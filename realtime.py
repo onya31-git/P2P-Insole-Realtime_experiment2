@@ -3,57 +3,12 @@ import json
 import torch
 import time
 import argparse
+import os
 import urllib.request
 import urllib.error
-from kinematic_model import KinematicFusionModel, OneEuroFilter
-
-def preprocess_foot_pressure(p_list, device):
-    """
-    35点の圧力データを (1, 1, 2, 32, 32) のテンソルに変換します。
-    ※現状はダミーのマッピング（単一の特徴として複製およびパディング）を行っています。
-    ※両足分(Channel=2)として、同じデータを複製しています。
-    """
-    # p_list: 35 elements
-    tensor_p = torch.tensor(p_list, dtype=torch.float32, device=device)
-    
-    # 32x32 = 1024点の画像データに対して、35点を適当にマッピングします。
-    # 実際には物理的なセンサー位置に基づいたグリッド補間（Grid interpolation）等が必要です。
-    grid = torch.zeros((32 * 32,), dtype=torch.float32, device=device)
-    grid[:35] = tensor_p
-    grid = grid.view(32, 32)
-    
-    # [B=1, Seq=1, C=2, H=32, W=32]
-    # C=2 (Left/Right) として同じデータを両方のチャネルに入れています
-    out_tensor = torch.stack([grid, grid], dim=0).unsqueeze(0).unsqueeze(0)
-    return out_tensor
-
-def preprocess_imu(acc, gyro, device):
-    """
-    加速度(3)とジャイロ(3)を結合し、(1, 1, 5, 6) のIMUテンソルに変換します。
-    ※現状は取得した1つのセンサーデータを5つの関節センサ（Hip, Knee, Ankle等）に複製しています。
-    """
-    combined = torch.tensor(acc + gyro, dtype=torch.float32, device=device) # (6,)
-    
-    # 5センサー分に複製する [5, 6]
-    repeated = combined.unsqueeze(0).repeat(5, 1)
-    
-    # [B=1, Seq=1, N_sensors=5, D=6]
-    out_tensor = repeated.unsqueeze(0).unsqueeze(0)
-    return out_tensor
-
-def parse_sse_payload(payload_str):
-    """
-    "data: {...}" 形式の文字列から JSON をパースして辞書で返します。
-    """
-    payload_str = payload_str.strip()
-    if payload_str.startswith("data:"):
-        payload_str = payload_str[5:].strip()
-    
-    try:
-        return json.loads(payload_str)
-    except json.JSONDecodeError as e:
-        print(f"JSON Decode Error: {e}")
-        return None
+from models.model import KinematicFusionModel
+from processor.filter import OneEuroFilter
+from processor.preprocessor import preprocess_foot_pressure, preprocess_imu, parse_sse_payload
 
 def main():
     parser = argparse.ArgumentParser()
@@ -73,12 +28,21 @@ def main():
     NUM_JOINTS = 24
     model = KinematicFusionModel(num_joints=NUM_JOINTS, imu_sensors=NUM_SENSORS).to(device)
     
-    if args.weights:
-        try:
-            model.load_state_dict(torch.load(args.weights, map_location=device))
-            print(f"Loaded weights from {args.weights}")
-        except Exception as e:
-            print(f"Failed to load weights: {e}")
+    # --- スクリプト内でロードする重みファイルを指定 ---
+    # 例: "weights/kinematic_model_20260408_154441.pth" （空文字の場合は引数 --weights が優先されます）
+    TARGET_WEIGHT_PATH = ""
+    
+    weight_to_load = TARGET_WEIGHT_PATH if TARGET_WEIGHT_PATH else args.weights
+
+    if weight_to_load:
+        if os.path.exists(weight_to_load):
+            try:
+                model.load_state_dict(torch.load(weight_to_load, map_location=device))
+                print(f"Loaded weights from {weight_to_load}")
+            except Exception as e:
+                print(f"Failed to load weights: {e}")
+        else:
+            print(f"Warning: Weight file '{weight_to_load}' not found. Using initialized weights.")
             
     model.eval()
     model.set_stateful(True) # リアルタイム推論モード（前フレーム状態保持）
