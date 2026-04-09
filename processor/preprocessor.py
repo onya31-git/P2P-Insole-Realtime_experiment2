@@ -3,27 +3,28 @@ import torch
 
 def preprocess_foot_pressure(p_list, device):
     """
-    35点の圧力データを (1, 1, 2, 32, 32) のテンソルに変換します。
-    ※現状はダミーのマッピング（単一の特徴として複製およびパディング）を行っています。
-    ※両足分(Channel=2)として、同じデータを複製しています。
+    35点の圧力データを (1, 1, 70) のテンソルに変換します。
+    ※現状のストリームは片足分しか送られてこないと仮定し、左・右の両方として同じデータを複製して結合します。
     """
     tensor_p = torch.tensor(p_list, dtype=torch.float32, device=device)
     
-    grid = torch.zeros((32 * 32,), dtype=torch.float32, device=device)
-    grid[:35] = tensor_p
-    grid = grid.view(32, 32)
-    
-    out_tensor = torch.stack([grid, grid], dim=0).unsqueeze(0).unsqueeze(0)
+    # 左右それぞれ35点ずつとして結合 (70次元)
+    out_tensor = torch.cat([tensor_p, tensor_p], dim=0).unsqueeze(0).unsqueeze(0)
     return out_tensor
 
 def preprocess_imu(acc, gyro, device):
     """
-    加速度(3)とジャイロ(3)を結合し、(1, 1, 5, 6) のIMUテンソルに変換します。
-    ※現状は取得した1つのセンサーデータを5つの関節センサ（Hip, Knee, Ankle等）に複製しています。
+    加速度(3)とジャイロ(3)から、(1, 1, 2, 9) のIMUテンソルに変換します。
+    ※データにMag(地磁気)が含まれていないため、0で補完します。
+    ※現状は取得した1つのセンサーデータを左右の2つの足用（センサー数=2）に複製しています。
     """
-    combined = torch.tensor(acc + gyro, dtype=torch.float32, device=device)
+    mag = [0.0, 0.0, 0.0]
+    # データの順序がCSVに合わせて (Mag_x,y,z, Gyro_x,y,z, Acc_x,y,z) 等であると仮定
+    # CSVでは Mag, Gyro, Acc の順
+    combined = torch.tensor(mag + gyro + acc, dtype=torch.float32, device=device)
     
-    repeated = combined.unsqueeze(0).repeat(5, 1)
+    # 2つのセンサー(左右)として複製 -> Shape: (2, 9)
+    repeated = combined.unsqueeze(0).repeat(2, 1)
     
     out_tensor = repeated.unsqueeze(0).unsqueeze(0)
     return out_tensor

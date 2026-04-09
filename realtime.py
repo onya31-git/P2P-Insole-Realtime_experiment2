@@ -24,13 +24,12 @@ def main():
     # ==============================
     # 1. モデルとフィルタの初期化
     # ==============================
-    NUM_SENSORS = 5
     NUM_JOINTS = 24
-    model = KinematicFusionModel(num_joints=NUM_JOINTS, imu_sensors=NUM_SENSORS).to(device)
+    model = KinematicFusionModel(foot_features=70, imu_sensors=2, imu_channels=9, num_joints=NUM_JOINTS).to(device)
     
     # --- スクリプト内でロードする重みファイルを指定 ---
     # 例: "weights/kinematic_model_20260408_154441.pth" （空文字の場合は引数 --weights が優先されます）
-    TARGET_WEIGHT_PATH = ""
+    TARGET_WEIGHT_PATH = "weights/kinematic_model_20260409_144139.pth"
     
     weight_to_load = TARGET_WEIGHT_PATH if TARGET_WEIGHT_PATH else args.weights
 

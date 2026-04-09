@@ -5,36 +5,25 @@ import torch.nn.functional as F
 # ==========================================
 # 1. 足裏圧力分布 (2D-CNN) Encoder
 # ==========================================
-class DepthwiseSeparableConv2d(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, padding=1):
-        super().__init__()
-        self.depthwise = nn.Conv2d(in_channels, in_channels, kernel_size=kernel_size, padding=padding, groups=in_channels)
-        self.pointwise = nn.Conv2d(in_channels, out_channels, kernel_size=1)
-        self.relu = nn.ReLU(inplace=True)
 
-    def forward(self, x):
-        x = self.depthwise(x)
-        x = self.pointwise(x)
-        return self.relu(x)
 
 class FootPressureEncoder(nn.Module):
-    def __init__(self, in_channels=2, out_features=128):
+    def __init__(self, in_features=70, out_features=128):
         super().__init__()
-        # PyTorchのConv2dの入力は (Batch, Channels, H, W)
+        # 左右の足それぞれ35個の圧力点 -> 計70個などの1Dベクトル入力を想定
         self.net = nn.Sequential(
-            DepthwiseSeparableConv2d(in_channels, 32, kernel_size=3, padding=1),
-            nn.MaxPool2d(2),
-            DepthwiseSeparableConv2d(32, 64, kernel_size=3, padding=1),
-            nn.MaxPool2d(2),
-            DepthwiseSeparableConv2d(64, out_features, kernel_size=3, padding=1),
-            nn.AdaptiveAvgPool2d((1, 1)) # Global Average Pooling
+            nn.Linear(in_features, 128),
+            nn.BatchNorm1d(128),
+            nn.ReLU(inplace=True),
+            nn.Linear(128, out_features),
+            nn.BatchNorm1d(out_features),
+            nn.ReLU(inplace=True)
         )
         self.out_features = out_features
 
     def forward(self, x):
-        # x: (B, C, H, W)
+        # x: (B*Seq, in_features)
         x = self.net(x)
-        x = x.view(x.size(0), -1) # Flatten -> (B, out_features)
         return x
 
 # ==========================================

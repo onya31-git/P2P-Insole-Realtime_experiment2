@@ -29,51 +29,58 @@ class KinematicLoss(nn.Module):
         loss = loss_quat + self.lambda_bone * loss_bone
         return loss
 
-def train_dummy():
-    """ダミーデータを用いたトレーニングループ"""
+from dataset.insole_dataset import KinematicDataset
+from torch.utils.data import DataLoader
+
+def train():
+    """実データを用いたトレーニングループ"""
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
     
     # パラメータ設定
     BATCH_SIZE = 8
     SEQ_LEN = 20
-    H, W = 32, 32
-    NUM_SENSORS = 5
+    # NUM_SENSORS=2, imu_channels=9 は model.py のデフォルト値に従う
     NUM_JOINTS = 24
-    EPOCHS = 3
+    EPOCHS = 10
     
-    model = KinematicFusionModel(num_joints=NUM_JOINTS, imu_sensors=NUM_SENSORS).to(device)
+    model = KinematicFusionModel(foot_features=70, imu_sensors=2, imu_channels=9, num_joints=NUM_JOINTS).to(device)
     model.set_stateful(False) # 学習時はBatch・Sequence全体を一括処理
     
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     criterion = KinematicLoss()
     
+    print("--- Loading Dataset ---")
+    dataset = KinematicDataset(insole_dir='data/insole', skeleton_dir='data/skeleton', seq_len=SEQ_LEN, num_joints=NUM_JOINTS)
+    dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
+    
+    print(f"Dataset Size: {len(dataset)} sequences")
     print("--- Training Started ---")
     model.train()
+    
     for epoch in range(EPOCHS):
-        # ダミーデータの生成
-        # foot_pressure: (B, Seq, Channels, H, W) ※入力要件に合わせてチャンネルの次元を変更
-        dummy_foot = torch.rand((BATCH_SIZE, SEQ_LEN, 2, H, W)).to(device)
-        # imu_data: (B, Seq, N_sensors, 6)
-        dummy_imu = torch.rand((BATCH_SIZE, SEQ_LEN, NUM_SENSORS, 6)).to(device)
-        
-        # Target Quaternion: 正規化済みのダミーデータ
-        target_quat = torch.rand((BATCH_SIZE, SEQ_LEN, NUM_JOINTS, 4)).to(device)
-        target_quat = F.normalize(target_quat, p=2, dim=-1)
-        
-        optimizer.zero_grad()
-        
-        # 順伝播
-        outputs = model(dummy_foot, dummy_imu)
-        
-        # 損失計算
-        loss = criterion(outputs, target_quat)
-        
-        # 逆伝播・パラメータ更新
-        loss.backward()
-        optimizer.step()
-        
-        print(f"Epoch [{epoch+1}/{EPOCHS}], Loss: {loss.item():.4f}")
+        total_loss = 0.0
+        for batch_idx, (foot_pressure, imu_data, target_quat) in enumerate(dataloader):
+            foot_pressure = foot_pressure.to(device)
+            imu_data = imu_data.to(device)
+            target_quat = F.normalize(target_quat.to(device), p=2, dim=-1)
+            
+            optimizer.zero_grad()
+            
+            # 順伝播
+            outputs = model(foot_pressure, imu_data)
+            
+            # 損失計算
+            loss = criterion(outputs, target_quat)
+            
+            # 逆伝播・パラメータ更新
+            loss.backward()
+            optimizer.step()
+            
+            total_loss += loss.item()
+            
+        avg_loss = total_loss / len(dataloader)
+        print(f"Epoch [{epoch+1}/{EPOCHS}], Average Loss: {avg_loss:.4f}")
         
     # 重みの保存処理
     save_dir = "weights"
@@ -89,11 +96,9 @@ def inference_realtime_dummy(weight_path=None):
     """1 Euro Filterを統合したリアルタイム推論のシミュレーション"""
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
-    H, W = 32, 32
-    NUM_SENSORS = 5
     NUM_JOINTS = 24
     
-    model = KinematicFusionModel(num_joints=NUM_JOINTS, imu_sensors=NUM_SENSORS).to(device)
+    model = KinematicFusionModel(foot_features=70, imu_sensors=2, imu_channels=9, num_joints=NUM_JOINTS).to(device)
     
     # --- スクリプト内でロードする重みファイルを指定 ---
     # `weight_path` が渡されない場合は、ここに直接ファイル名を手動で指定します
@@ -119,9 +124,9 @@ def inference_realtime_dummy(weight_path=None):
             start_time = time.time()
             
             # 1フレームごとのストリームデータ（Batch=1, Seq=1）
-            # 実際の環境では補間 (Interpolation) 等で同期済のデータが入る想定
-            st_foot = torch.rand((1, 1, 2, H, W)).to(device)
-            st_imu = torch.rand((1, 1, NUM_SENSORS, 6)).to(device)
+            # 新しい入力：足圧 70次元(1D), IMU 2センサーx9チャンネル
+            st_foot = torch.rand((1, 1, 70)).to(device)
+            st_imu = torch.rand((1, 1, 2, 9)).to(device)
             
             out_quat = model(st_foot, st_imu)
             out_quat_filtered = euro_filter(start_time, out_quat)
@@ -130,5 +135,5 @@ def inference_realtime_dummy(weight_path=None):
             print(f"Frame {i+1}: Latency = {elapsed:.2f} ms | Output Shape: {out_quat_filtered.shape}")
 
 if __name__ == "__main__":
-    saved_model_path = train_dummy()
+    saved_model_path = train()
     inference_realtime_dummy(saved_model_path)

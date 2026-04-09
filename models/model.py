@@ -5,10 +5,10 @@ import torch.nn.functional as F
 from .encoder import FootPressureEncoder, IMUEncoder, StatefulLSTM
 
 class KinematicFusionModel(nn.Module):
-    def __init__(self, foot_channels=2, imu_sensors=5, imu_channels=6, 
+    def __init__(self, foot_features=70, imu_sensors=2, imu_channels=9, 
                  foot_out=128, imu_out=128, lstm_hidden=256, num_joints=24, lstm_layers=1):
         super().__init__()
-        self.foot_encoder = FootPressureEncoder(in_channels=foot_channels, out_features=foot_out)
+        self.foot_encoder = FootPressureEncoder(in_features=foot_features, out_features=foot_out)
         self.imu_encoder = IMUEncoder(in_channels=imu_channels, num_sensors=imu_sensors, out_features=imu_out)
         
         lstm_input_size = foot_out + imu_out
@@ -22,9 +22,10 @@ class KinematicFusionModel(nn.Module):
         self.fusion_lstm.set_stateful(stateful)
 
     def forward(self, foot_pressure, imu_data):
-        B, Seq, C, H, W = foot_pressure.size()
+        # foot_pressure: (B, Seq, F)
+        B, Seq, F_dim = foot_pressure.size()
         
-        f_in = foot_pressure.view(B * Seq, C, H, W)
+        f_in = foot_pressure.view(B * Seq, F_dim)
         foot_feat = self.foot_encoder(f_in) 
         foot_feat = foot_feat.view(B, Seq, -1)
         
