@@ -14,7 +14,7 @@ class KinematicFusionModel(nn.Module):
         lstm_input_size = foot_out + imu_out
         self.fusion_lstm = StatefulLSTM(input_size=lstm_input_size, hidden_size=lstm_hidden, num_layers=lstm_layers)
         
-        self.fc_out = nn.Linear(lstm_hidden, num_joints * 4)
+        self.fc_out = nn.Linear(lstm_hidden, num_joints * 3)
         self.num_joints = num_joints
 
     def set_stateful(self, stateful: bool):
@@ -38,6 +38,5 @@ class KinematicFusionModel(nn.Module):
         lstm_out = self.fusion_lstm(fusion_feat)
         
         out = self.fc_out(lstm_out) 
-        out = out.view(B, Seq, self.num_joints, 4)
-        out = F.normalize(out, p=2, dim=-1) 
+        out = out.view(B, Seq, self.num_joints, 3)
         return out

@@ -28,18 +28,23 @@ def main():
     model = KinematicFusionModel(foot_features=70, imu_sensors=2, imu_channels=9, num_joints=NUM_JOINTS).to(device)
     
     # --- スクリプト内でロードする重みファイルを指定 ---
-    # 例: "weights/kinematic_model_20260408_154441.pth" （空文字の場合は引数 --weights が優先されます）
-    TARGET_WEIGHT_PATH = "weights/kinematic_model_20260409_144139.pth"
+    # もし args.weights が指定されていなければ、weightsディレクトリ内の最新の重みを使用
+    import glob
+    weight_files = sorted(glob.glob("weights/*.pth"))
+    TARGET_WEIGHT_PATH = weight_files[-1] if weight_files else ""
     
-    weight_to_load = TARGET_WEIGHT_PATH if TARGET_WEIGHT_PATH else args.weights
+    weight_to_load = args.weights if args.weights else TARGET_WEIGHT_PATH
 
     if weight_to_load:
         if os.path.exists(weight_to_load):
             try:
-                model.load_state_dict(torch.load(weight_to_load, map_location=device))
+                # weights_only=True を推奨
+                model.load_state_dict(torch.load(weight_to_load, map_location=device, weights_only=True))
                 print(f"Loaded weights from {weight_to_load}")
             except Exception as e:
                 print(f"Failed to load weights: {e}")
+                # 学習済み重みがロードできない状態（ランダムな未学習モデル）で実行すると骨格が崩壊するため、ここで停止させます。
+                raise RuntimeError("Failed to load the model weights compatible with the current architecture.") from e
         else:
             print(f"Warning: Weight file '{weight_to_load}' not found. Using initialized weights.")
             
@@ -89,26 +94,26 @@ def main():
                 # --- 推論 ---
                 start_time = time.time()
                 with torch.no_grad():
-                    out_quat = model(foot_tensor, imu_tensor)
+                    out_pos = model(foot_tensor, imu_tensor)
                     # ジッタ抑制フィルタの適用
-                    out_quat_filtered = euro_filter(start_time, out_quat)
+                    out_pos_filtered = euro_filter(start_time, out_pos)
                 
                 latency_ms = (time.time() - start_time) * 1000
                 
                 # --- 後処理とデータ送信 ---
-                # (Batch=1, Seq=1, Joints=24, 4) -> (24, 4) のリストへ変換
-                quat_list = out_quat_filtered.squeeze().cpu().numpy().tolist()
+                # (Batch=1, Seq=1, Joints=24, 3) -> (24, 3) のリストへ変換
+                pos_list = out_pos_filtered.squeeze().cpu().numpy().tolist()
                 
                 output_msg = {
                     "ts": time.time(),
                     "latency_ms": round(latency_ms, 2),
-                    "pose_quaternion": quat_list
+                    "pose_positions": pos_list
                 }
                 
                 # ストリーム出力として指定ポートへ送信
                 sock_send.sendto(json.dumps(output_msg).encode('utf-8'), (args.send_ip, args.send_port))
                 
-                print(f"Processed frame. Latency: {latency_ms:.2f} ms | Output Joints: {len(quat_list)}")
+                print(f"Processed frame. Latency: {latency_ms:.2f} ms | Output Positions: {len(pos_list)}")
 
     except KeyboardInterrupt:
         print("\nStopped real-time inference.")

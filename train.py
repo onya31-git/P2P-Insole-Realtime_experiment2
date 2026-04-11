@@ -17,16 +17,14 @@ class KinematicLoss(nn.Module):
         self.mse_loss = nn.MSELoss()
         self.lambda_bone = lambda_bone
 
-    def forward(self, pred_quat, target_quat):
-        # クォータニオンに対するMSE誤差 
-        # (※ 厳密には q と -q は同じ回転を表すが、連続した時系列予測ならMSEでも一定の学習は可能。
-        # 正確には 1 - |q1*q2| などを利用する場合もあるが、要件に合わせてMSEを採用)
-        loss_quat = self.mse_loss(pred_quat, target_quat)
+    def forward(self, pred_pos, target_pos):
+        # 3D座標(Positions)のMSE誤差
+        loss_pos = self.mse_loss(pred_pos, target_pos)
         
-        # 骨の長さを比較する制約ペナルティ（モック。実際はFKで3D座標を求めて距離を計算）
-        loss_bone = torch.tensor(0.0, device=pred_quat.device)
+        # 将来的には骨の長さを一定に保つ制約追加なども可能
+        loss_bone = torch.tensor(0.0, device=pred_pos.device)
         
-        loss = loss_quat + self.lambda_bone * loss_bone
+        loss = loss_pos + self.lambda_bone * loss_bone
         return loss
 
 from dataset.insole_dataset import KinematicDataset
@@ -40,14 +38,14 @@ def train():
     # パラメータ設定
     BATCH_SIZE = 8
     SEQ_LEN = 20
-    # NUM_SENSORS=2, imu_channels=9 は model.py のデフォルト値に従う
     NUM_JOINTS = 24
-    EPOCHS = 10
+    EPOCHS = 30   # 十分な学習のためエポック数を増やす
     
     model = KinematicFusionModel(foot_features=70, imu_sensors=2, imu_channels=9, num_joints=NUM_JOINTS).to(device)
     model.set_stateful(False) # 学習時はBatch・Sequence全体を一括処理
     
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
     criterion = KinematicLoss()
     
     print("--- Loading Dataset ---")
@@ -60,10 +58,10 @@ def train():
     
     for epoch in range(EPOCHS):
         total_loss = 0.0
-        for batch_idx, (foot_pressure, imu_data, target_quat) in enumerate(dataloader):
+        for batch_idx, (foot_pressure, imu_data, target_pos) in enumerate(dataloader):
             foot_pressure = foot_pressure.to(device)
             imu_data = imu_data.to(device)
-            target_quat = F.normalize(target_quat.to(device), p=2, dim=-1)
+            target_pos = target_pos.to(device)
             
             optimizer.zero_grad()
             
@@ -71,7 +69,7 @@ def train():
             outputs = model(foot_pressure, imu_data)
             
             # 損失計算
-            loss = criterion(outputs, target_quat)
+            loss = criterion(outputs, target_pos)
             
             # 逆伝播・パラメータ更新
             loss.backward()
@@ -80,7 +78,8 @@ def train():
             total_loss += loss.item()
             
         avg_loss = total_loss / len(dataloader)
-        print(f"Epoch [{epoch+1}/{EPOCHS}], Average Loss: {avg_loss:.4f}")
+        print(f"Epoch [{epoch+1}/{EPOCHS}], Average Loss: {avg_loss:.5f}, LR: {scheduler.get_last_lr()[0]:.6f}")
+        scheduler.step()
         
     # 重みの保存処理
     save_dir = "weights"
