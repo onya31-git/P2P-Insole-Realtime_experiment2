@@ -33,7 +33,8 @@ def main():
     # ==============================
     NUM_JOINTS = 24
     model = KinematicFusionModel(
-        foot_features=70, imu_sensors=2, imu_channels=9, num_joints=NUM_JOINTS
+        foot_features=70, imu_sensors=2, imu_channels=9, num_joints=NUM_JOINTS,
+        foot_out=256, imu_out=256, lstm_hidden=256, lstm_layers=2
     ).to(device)
 
     # 最新の重みを自動選択
@@ -55,7 +56,9 @@ def main():
     model.eval()
     model.set_stateful(True)  # リアルタイム推論モード（LSTM状態保持）
 
-    euro_filter = OneEuroFilter(mincutoff=1.0, beta=0.01, dcutoff=1.0)
+    # OneEuroFilter: mincutoff=3.0で動きを通過させやすくする
+    # 以前の0.5は過剰スムーシングで動きが消えていた
+    euro_filter = OneEuroFilter(mincutoff=3.0, beta=0.05, dcutoff=1.0)
 
     # ==============================
     # 2. 通信の初期化

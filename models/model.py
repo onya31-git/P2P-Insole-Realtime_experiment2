@@ -5,8 +5,8 @@ import torch.nn.functional as F
 from .encoder import FootPressureEncoder, IMUEncoder, StatefulLSTM
 
 class KinematicFusionModel(nn.Module):
-    def __init__(self, foot_features=70, imu_sensors=2, imu_channels=9, 
-                 foot_out=128, imu_out=128, lstm_hidden=256, num_joints=24, lstm_layers=1):
+    def __init__(self, foot_features=70, imu_sensors=2, imu_channels=9,
+                 foot_out=256, imu_out=256, lstm_hidden=512, num_joints=24, lstm_layers=2):
         super().__init__()
         self.foot_encoder = FootPressureEncoder(in_features=foot_features, out_features=foot_out)
         self.imu_encoder = IMUEncoder(in_channels=imu_channels, num_sensors=imu_sensors, out_features=imu_out)
