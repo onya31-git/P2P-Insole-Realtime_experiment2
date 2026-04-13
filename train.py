@@ -114,7 +114,7 @@ def train():
     # モデル: lstmを256に戻して過学習を防止（foot/imuエンコーダは大きいまま）
     model = KinematicFusionModel(
         foot_features=70, imu_sensors=2, imu_channels=9, num_joints=NUM_JOINTS,
-        foot_out=256, imu_out=256, lstm_hidden=256, lstm_layers=2
+        foot_out=256, imu_out=256, lstm_hidden=512, lstm_layers=2
     ).to(device)
     model.set_stateful(False)
 
