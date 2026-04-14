@@ -36,60 +36,31 @@ BONE_PAIRS = [
 
 
 # ==========================================
-# 損失関数 (Weighted SmoothL1 + 骨長制約 + 速度 + 加速度)
+# 損失関数
 # ==========================================
 class KinematicLoss(nn.Module):
-    def __init__(self, lambda_bone=0.3, lambda_vel=0.1, lambda_acc=0.5):
+    def __init__(self, lambda_bone=0.5):
         super().__init__()
+        self.mse_loss    = nn.MSELoss()
         self.lambda_bone = lambda_bone
-        self.lambda_vel  = lambda_vel
-        self.lambda_acc  = lambda_acc
-
-        # 関節ごとの重み (計24関節)
-        # 6,10,17,20 (足先) を 2.5倍、7,8,11,12 (足首/膝) を 1.5倍に設定
-        weights = torch.ones(24)
-        weights[[6, 10, 17, 20]] = 2.5  # Toes
-        weights[[7, 8, 11, 12]]  = 1.5  # Ankle / Knee
-        self.register_buffer('joint_weights', weights.view(1, 1, 24, 1))
-
-        # 安定させたい中心軸の関節 (Hip, Spine)
-        self.stable_joints = [9, 13, 21, 22, 23]
 
     def forward(self, pred_pos, target_pos):
         """
         pred_pos, target_pos: (B, Seq, 24, 3)
         """
-        # 1. 重み付き位置ロス (SmoothL1)
-        # beta=0.05: 5cm以下の誤差を二乗で、それ以上を線形で扱う
-        loss_pos = F.smooth_l1_loss(pred_pos, target_pos, reduction='none', beta=0.05)
-        loss_pos = (loss_pos * self.joint_weights).mean()
+        # 位置座標MSE
+        loss_pos = self.mse_loss(pred_pos, target_pos)
 
-        # 2. 骨の長さ一定制約 (MAE)
+        # 骨の長さ一定制約 Loss
+        # 予測と正解の骨長が一致するように学習する
         bone_loss = 0.0
         for i, j in BONE_PAIRS:
-            pred_len   = torch.norm(pred_pos[..., i, :] - pred_pos[..., j, :], dim=-1)
-            target_len = torch.norm(target_pos[..., i, :] - target_pos[..., j, :], dim=-1)
-            bone_loss += F.l1_loss(pred_len, target_len)
+            pred_len   = torch.norm(pred_pos[..., i, :]   - pred_pos[..., j, :],   dim=-1)  # (B, Seq)
+            target_len = torch.norm(target_pos[..., i, :] - target_pos[..., j, :], dim=-1)  # (B, Seq)
+            bone_loss += F.mse_loss(pred_len, target_len)
         bone_loss /= len(BONE_PAIRS)
 
-        # 3. 速度一貫性ロス (MAE)
-        if pred_pos.size(1) > 1:
-            pred_vel   = pred_pos[:, 1:, :, :] - pred_pos[:, :-1, :, :]
-            target_vel = target_pos[:, 1:, :, :] - target_pos[:, :-1, :, :]
-            vel_loss   = F.l1_loss(pred_vel, target_vel)
-        else:
-            vel_loss = torch.tensor(0.0, device=pred_pos.device)
-
-        # 4. 加速度（安定性）ペナルティ
-        # 特定の関節 (Spine/Hip) の急激な変化を抑制
-        if pred_pos.size(1) > 2:
-            # 加速度 = (x_{t+1} - x_t) - (x_t - x_{t-1}) = x_{t+1} - 2x_t + x_{t-1}
-            acc = pred_pos[:, 2:, self.stable_joints, :] - 2*pred_pos[:, 1:-1, self.stable_joints, :] + pred_pos[:, :-2, self.stable_joints, :]
-            acc_loss = torch.norm(acc, dim=-1).mean()
-        else:
-            acc_loss = torch.tensor(0.0, device=pred_pos.device)
-
-        return loss_pos + self.lambda_bone * bone_loss + self.lambda_vel * vel_loss + self.lambda_acc * acc_loss
+        return loss_pos + self.lambda_bone * bone_loss
 
 
 from dataset.insole_dataset import KinematicDataset
@@ -106,15 +77,14 @@ def train():
     # ==========================================
     # パラメータ設定
     # ==========================================
-    BATCH_SIZE = 16
-    SEQ_LEN    = 50
+    BATCH_SIZE = 16   # GPUを活用するためバッチサイズを増加
+    SEQ_LEN    = 50   # 施策B: シーケンス長を50フレームに拡大
     NUM_JOINTS = 24
-    EPOCHS     = 50
+    EPOCHS     = 50   # より多くのエポックで安定した収束を狙う
 
-    # モデル: lstmを256に戻して過学習を防止（foot/imuエンコーダは大きいまま）
+    # モデル（デフォルトで foot_out=256, imu_out=256, lstm_hidden=512, lstm_layers=2）
     model = KinematicFusionModel(
-        foot_features=70, imu_sensors=2, imu_channels=9, num_joints=NUM_JOINTS,
-        foot_out=256, imu_out=256, lstm_hidden=512, lstm_layers=2
+        foot_features=70, imu_sensors=2, imu_channels=9, num_joints=NUM_JOINTS
     ).to(device)
     model.set_stateful(False)
 
@@ -122,7 +92,7 @@ def train():
     optimizer = torch.optim.AdamW(model.parameters(), lr=5e-4, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=EPOCHS, eta_min=1e-5)
 
-    criterion = KinematicLoss(lambda_bone=0.3, lambda_vel=0.1, lambda_acc=0.5).to(device)
+    criterion = KinematicLoss(lambda_bone=0.5)
 
     print("--- Loading Dataset ---")
     dataset    = KinematicDataset(
@@ -194,10 +164,9 @@ def inference_realtime_dummy(weight_path=None):
     model.eval()
     model.set_stateful(True)
 
-    # 施策D: OneEuroFilter パラメータ
-    # mincutoff=3.0: 動きをより通過させる（0.5は過剰スムーシング）
-    # beta=0.05: 速い動きにも素早く追従
-    euro_filter = OneEuroFilter(mincutoff=3.0, beta=0.05, dcutoff=1.0)
+    # 施策D: OneEuroFilter パラメータ最適化
+    # mincutoff=0.5にすることでスムーシングを強化、beta=0.003で速い動きへの追従を保つ
+    euro_filter = OneEuroFilter(mincutoff=0.5, beta=0.003, dcutoff=1.0)
 
     print("\n--- Realtime Inference Simulation ---")
     with torch.no_grad():

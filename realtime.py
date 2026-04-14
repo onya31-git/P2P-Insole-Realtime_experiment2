@@ -33,13 +33,11 @@ def main():
     # ==============================
     NUM_JOINTS = 24
     model = KinematicFusionModel(
-        foot_features=70, imu_sensors=2, imu_channels=9, num_joints=NUM_JOINTS,
-        foot_out=256, imu_out=256, lstm_hidden=512, lstm_layers=2
+        foot_features=70, imu_sensors=2, imu_channels=9, num_joints=NUM_JOINTS
     ).to(device)
 
     # 最新の重みを自動選択
     weight_files = sorted(glob.glob("weights/*.pth"))
-    # weight_files = "weights/kinematic_model_20260412_202209.pth"
     TARGET_WEIGHT_PATH = weight_files[-1] if weight_files else ""
     weight_to_load = args.weights if args.weights else TARGET_WEIGHT_PATH
 
@@ -57,9 +55,11 @@ def main():
     model.eval()
     model.set_stateful(True)  # リアルタイム推論モード（LSTM状態保持）
 
-    # OneEuroFilter: mincutoff=3.0で動きを通過させやすくする
-    # 以前の0.5は過剰スムーシングで動きが消えていた
-    euro_filter = OneEuroFilter(mincutoff=0.5, beta=0.05, dcutoff=1.0)
+    # 施策D: OneEuroFilter パラメータ最適化
+    # mincutoff=0.5: 小さくするほど遅い動きのスムーシングが強化される
+    # beta=0.003: 大きくするほど速い動きに素早く追従する
+    # dcutoff=1.0: 速度のカットオフ周波数（デフォルトのままで問題なし）
+    euro_filter = OneEuroFilter(mincutoff=0.5, beta=0.003, dcutoff=1.0)
 
     # ==============================
     # 2. 通信の初期化
