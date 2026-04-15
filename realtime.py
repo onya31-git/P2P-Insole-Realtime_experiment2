@@ -7,6 +7,7 @@ import os
 import glob
 import urllib.request
 import urllib.error
+from models.model import HierarchicalKinematicFusionModel
 from models.model import KinematicFusionModel
 from processor.filter import OneEuroFilter
 from processor.preprocessor import preprocess_both_feet, parse_sse_payload
@@ -32,7 +33,8 @@ def main():
     # 1. モデルとフィルタの初期化
     # ==============================
     NUM_JOINTS = 24
-    model = KinematicFusionModel(
+    # model = KinematicFusionModel(
+    model = HierarchicalKinematicFusionModel(
         foot_features=70, imu_sensors=2, imu_channels=9, num_joints=NUM_JOINTS
     ).to(device)
 

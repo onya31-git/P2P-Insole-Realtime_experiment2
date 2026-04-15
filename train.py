@@ -6,6 +6,7 @@ import torch.nn.functional as F
 import time
 import random
 
+from models.model import HierarchicalKinematicFusionModel
 from models.model import KinematicFusionModel
 from processor.filter import OneEuroFilter
 
@@ -83,7 +84,8 @@ def train():
     EPOCHS     = 50   # より多くのエポックで安定した収束を狙う
 
     # モデル（デフォルトで foot_out=256, imu_out=256, lstm_hidden=512, lstm_layers=2）
-    model = KinematicFusionModel(
+    # model = KinematicFusionModel(
+    model = HierarchicalKinematicFusionModel(
         foot_features=70, imu_sensors=2, imu_channels=9, num_joints=NUM_JOINTS
     ).to(device)
     model.set_stateful(False)
@@ -152,7 +154,10 @@ def inference_realtime_dummy(weight_path=None):
     """動作確認用リアルタイム推論シミュレーション"""
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     NUM_JOINTS = 24
-    model = KinematicFusionModel(num_joints=NUM_JOINTS).to(device)
+    # model = KinematicFusionModel(num_joints=NUM_JOINTS).to(device)
+    model = HierarchicalKinematicFusionModel(num_joints=NUM_JOINTS).to(device)
+
+
 
     import glob
     weight_files    = sorted(glob.glob("weights/*.pth"))
