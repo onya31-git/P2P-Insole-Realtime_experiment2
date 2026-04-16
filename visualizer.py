@@ -198,7 +198,7 @@ def update_graph(n):
         scene=dict(
             xaxis=dict(range=[-1, 1], title='X (左右)'),
             yaxis=dict(range=[-1, 1], title='Y (奥行)'),
-            zaxis=dict(range=[-0.2, 2.0], title='Z (高さ)'),
+            zaxis=dict(range=[-1.2, 1.2], title='Z (高さ)'),
             aspectmode='manual',
             aspectratio=dict(x=1, y=1, z=2),
             camera=dict(

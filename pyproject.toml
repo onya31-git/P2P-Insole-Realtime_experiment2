@@ -2,8 +2,21 @@
 name = "p2p-insole-realtime"
 version = "0.1.0"
 description = "Add your description here"
-readme = "README.md"
+readme = "[README.md](http://readme.md/)"
 requires-python = ">=3.12"
 dependencies = [
-    "torch[cpu]<2.6",
+"torch",
+"pandas",
+"numpy",
+"dash",
+"plotly",
+"scipy",
 ]
+
+[[tool.uv.index]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cu121"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch" }

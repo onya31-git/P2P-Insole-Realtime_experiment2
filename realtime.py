@@ -7,6 +7,7 @@ import os
 import glob
 import urllib.request
 import urllib.error
+from collections import deque
 from models.model import HierarchicalKinematicFusionModel
 from models.model import KinematicFusionModel
 from processor.filter import OneEuroFilter
@@ -55,12 +56,9 @@ def main():
             print(f"Warning: Weight file '{weight_to_load}' not found.")
 
     model.eval()
-    model.set_stateful(True)  # リアルタイム推論モード（LSTM状態保持）
+    model.set_stateful(False)  # リアルタイム推論モード（学習時と同等のステートレス・スライディングウィンドウ方式）
 
     # 施策D: OneEuroFilter パラメータ最適化
-    # mincutoff=0.5: 小さくするほど遅い動きのスムーシングが強化される
-    # beta=0.003: 大きくするほど速い動きに素早く追従する
-    # dcutoff=1.0: 速度のカットオフ周波数（デフォルトのままで問題なし）
     euro_filter = OneEuroFilter(mincutoff=0.5, beta=0.003, dcutoff=1.0)
 
     # ==============================
@@ -75,11 +73,14 @@ def main():
     print("Waiting for data from both feet...")
 
     # ==============================
-    # 3. 両足バッファ
+    # 3. バッファ（スライディングウィンドウ用）
     # ==============================
-    # 各足の最新フレームデータをキャッシュし、両方揃ったら推論する
     buffer_left  = None  # {"p": [...], "acc": [...], "gyro": [...], "mag": [...]}
     buffer_right = None
+    
+    SEQ_LEN = 50
+    sliding_foot = deque(maxlen=SEQ_LEN)
+    sliding_imu = deque(maxlen=SEQ_LEN)
 
     # ==============================
     # 4. リアルタイム推論ループ
@@ -145,19 +146,34 @@ def main():
                 )
 
                 # ==============================
-                # 6. 推論
+                # 6. スライディングウィンドウへ追加・推論
                 # ==============================
+                # (1, 1, F) -> (F,) にしてdequeへ
+                sliding_foot.append(foot_tensor.squeeze(0).squeeze(0))
+                sliding_imu.append(imu_tensor.squeeze(0).squeeze(0))
+                
+                # 50フレーム溜まるまでは待機 (最初の0.5秒間)
+                if len(sliding_foot) < SEQ_LEN:
+                    print(f"Buffering window... ({len(sliding_foot)}/{SEQ_LEN})")
+                    continue
+
                 start_time = time.time()
                 with torch.no_grad():
-                    out_pos = model(foot_tensor, imu_tensor)
-                    out_pos_filtered = euro_filter(start_time, out_pos)
+                    # (SEQ_LEN, F) のリストを (1, SEQ_LEN, F) テンソルにスタックして推論
+                    foot_seq = torch.stack(list(sliding_foot)).unsqueeze(0)
+                    imu_seq = torch.stack(list(sliding_imu)).unsqueeze(0)
+                    
+                    out_pos = model(foot_seq, imu_seq) # (1, SEQ_LEN, 24, 3)
+                    out_pos_last = out_pos[:, -1:, :, :] # 最後のフレームのみ抽出 (1, 1, 24, 3)
+                    
+                    out_pos_filtered = euro_filter(start_time, out_pos_last)
 
                 latency_ms = (time.time() - start_time) * 1000
 
                 # ==============================
                 # 7. 後処理とデータ送信
                 # ==============================
-                # (B=1, Seq=1, Joints=24, 3) -> (24, 3) のリスト
+                # (1, 1, 24, 3) -> (24, 3) のリスト
                 pos_list = out_pos_filtered.squeeze().cpu().numpy().tolist()
 
                 output_msg = {
