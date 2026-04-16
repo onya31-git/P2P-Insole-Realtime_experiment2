@@ -1,72 +1,67 @@
-import numpy as np
-import plotly.graph_objects as go
+import urllib.request
+import urllib.error
+from processor.preprocessor import parse_sse_payload
 
-PARENTS = [
-    -1,  0,  0,  0, 
-     1,  2,  3, 
-     4,  5,  6, 
-     7,  8,  9, 
-     9,  9, 12, 
-    13, 14, 
-    16, 17, 
-    18, 19, 
-    20, 21
-]
+# デバイスID（左足・右足）
+LEFT_FOOT_DN  = "3030F9284F54"
+RIGHT_FOOT_DN = "3030F92685D4"
+STREAM_URL = "http://163.143.136.103:5001/stream"
 
-OFFSETS_DUMMY = np.array([
-    [ 0.0,   0.0,   0.0  ],  # 0: Pelvis
-    [-0.09, -0.05,  0.0  ],  # 1: L_Hip
-    [ 0.09, -0.05,  0.0  ],  # 2: R_Hip
-    [ 0.0,   0.10,  0.0  ],  # 3: Spine1
-    [ 0.0,  -0.45,  0.0  ],  # 4: L_Knee
-    [ 0.0,  -0.45,  0.0  ],  # 5: R_Knee
-    [ 0.0,   0.12,  0.0  ],  # 6: Spine2
-    [ 0.0,  -0.42,  0.0  ],  # 7: L_Ankle
-    [ 0.0,  -0.42,  0.0  ],  # 8: R_Ankle
-    [ 0.0,   0.12,  0.0  ],  # 9: Spine3
-    [ 0.0,  -0.05,  0.15 ],  # 10: L_Foot
-    [ 0.0,  -0.05,  0.15 ],  # 11: R_Foot
-    [ 0.0,   0.15,  0.0  ],  # 12: Neck
-    [-0.05,  0.15,  0.0  ],  # 13: L_Collar
-    [ 0.05,  0.15,  0.0  ],  # 14: R_Collar
-    [ 0.0,   0.15,  0.0  ],  # 15: Head
-    [-0.15,  0.0,   0.0  ],  # 16: L_Shoulder
-    [ 0.15,  0.0,   0.0  ],  # 17: R_Shoulder
-    [ 0.0,  -0.28,  0.0  ],  # 18: L_Elbow
-    [ 0.0,  -0.28,  0.0  ],  # 19: R_Elbow
-    [ 0.0,  -0.25,  0.0  ],  # 20: L_Wrist
-    [ 0.0,  -0.25,  0.0  ],  # 21: R_Wrist
-    [ 0.0,  -0.10,  0.0  ],  # 22: L_Hand
-    [ 0.0,  -0.10,  0.0  ]   # 23: R_Hand
-], dtype=np.float32)
+def check_stream():
+    print(f"Connecting to {STREAM_URL} for data verification...")
+    try:
+        req = urllib.request.Request(STREAM_URL)
+        with urllib.request.urlopen(req) as response:
+            left_data = None
+            right_data = None
 
-def calculate_fk(quaternions):
-    positions = np.zeros((24, 3))
-    global_rots = [np.eye(3) for _ in range(24)]
-    
-    for i in range(24):
-        q = quaternions[i]
-        try:
-            from scipy.spatial.transform import Rotation as R
-            r = R.from_quat(q)
-            local_rot = r.as_matrix()
-        except:
-            local_rot = np.eye(3)
-        
-        parent = PARENTS[i]
-        if parent == -1:
-            global_rots[i] = local_rot
-            positions[i] = OFFSETS_DUMMY[i]
-        else:
-            global_rots[i] = global_rots[parent] @ local_rot
-            positions[i] = positions[parent] + (global_rots[parent] @ OFFSETS_DUMMY[i])
-            
-    return positions
+            for line in response:
+                raw_str = line.decode('utf-8').strip()
+                if not raw_str:
+                    continue
 
-identity_quats = [[0,0,0,1] for _ in range(24)]
-pos = calculate_fk(identity_quats)
-output = ""
-for i, p in enumerate(pos):
-    output += f"{i}: {p}\n"
-with open('output_fk_test.txt', 'w') as f:
-    f.write(output)
+                parsed = parse_sse_payload(raw_str)
+                if not parsed:
+                    continue
+
+                dn = parsed.get("dn", "")
+                payload_data = parsed.get("payload", {})
+                if not dn and payload_data:
+                    dn = payload_data.get("dn", "")
+
+                p_data = payload_data.get("p",    [])
+                acc    = payload_data.get("acc",   [])
+                gyro   = payload_data.get("gyro",  [])
+                mag    = payload_data.get("mag",   [0.0, 0.0, 0.0])
+
+                # データの形状チェック
+                if len(p_data) != 35 or len(acc) != 3 or len(gyro) != 3:
+                    continue
+
+                if dn == LEFT_FOOT_DN and left_data is None:
+                    left_data = {"p": p_data, "acc": acc, "gyro": gyro, "mag": mag}
+                    print("\n--- 左足データ取得成功 ---")
+                    print(f"圧力 (Min/Max/Mean): {min(p_data):.1f} / {max(p_data):.1f} / {(sum(p_data)/len(p_data)):.1f}")
+                    print(f"IMU Acc: {acc}")
+                    print(f"IMU Gyro: {gyro}")
+                    print(f"IMU Mag: {mag}")
+
+                elif dn == RIGHT_FOOT_DN and right_data is None:
+                    right_data = {"p": p_data, "acc": acc, "gyro": gyro, "mag": mag}
+                    print("\n--- 右足データ取得成功 ---")
+                    print(f"圧力 (Min/Max/Mean): {min(p_data):.1f} / {max(p_data):.1f} / {(sum(p_data)/len(p_data)):.1f}")
+                    print(f"IMU Acc: {acc}")
+                    print(f"IMU Gyro: {gyro}")
+                    print(f"IMU Mag: {mag}")
+
+                if left_data is not None and right_data is not None:
+                    print("\n両足のデータ正常に取得完了しました。スクリプトを終了します。")
+                    break
+
+    except KeyboardInterrupt:
+        print("\nInterrupted.")
+    except Exception as e:
+        print(f"Error: {e}")
+
+if __name__ == "__main__":
+    check_stream()
