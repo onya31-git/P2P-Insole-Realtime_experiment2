@@ -86,7 +86,7 @@ def train():
     # モデル（デフォルトで foot_out=256, imu_out=256, lstm_hidden=512, lstm_layers=2）
     # model = KinematicFusionModel(
     model = HierarchicalKinematicFusionModel(
-        foot_features=70, imu_sensors=2, imu_channels=9, num_joints=NUM_JOINTS
+        foot_features=70, imu_sensors=2, imu_channels=6, num_joints=NUM_JOINTS
     ).to(device)
     model.set_stateful(False)
 
@@ -178,7 +178,7 @@ def inference_realtime_dummy(weight_path=None):
         for i in range(10):
             start_time = time.time()
             st_foot = torch.rand((1, 1, 70)).to(device)
-            st_imu  = torch.rand((1, 1, 2, 9)).to(device)
+            st_imu  = torch.rand((1, 1, 2, 6)).to(device)
             out     = model(st_foot, st_imu)
             out_f   = euro_filter(start_time, out)
             elapsed = (time.time() - start_time) * 1000

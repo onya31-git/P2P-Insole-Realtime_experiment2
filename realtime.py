@@ -36,7 +36,7 @@ def main():
     NUM_JOINTS = 24
     # model = KinematicFusionModel(
     model = HierarchicalKinematicFusionModel(
-        foot_features=70, imu_sensors=2, imu_channels=9, num_joints=NUM_JOINTS
+        foot_features=70, imu_sensors=2, imu_channels=6, num_joints=NUM_JOINTS
     ).to(device)
 
     # 最新の重みを自動選択
@@ -137,11 +137,9 @@ def main():
                     p_l   = buffer_left["p"],
                     acc_l = buffer_left["acc"],
                     gyro_l= buffer_left["gyro"],
-                    mag_l = buffer_left["mag"],
                     p_r   = buffer_right["p"],
                     acc_r = buffer_right["acc"],
                     gyro_r= buffer_right["gyro"],
-                    mag_r = buffer_right["mag"],
                     device=device
                 )
 

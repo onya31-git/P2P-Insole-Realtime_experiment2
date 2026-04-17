@@ -9,8 +9,8 @@ IMU_GYRO_SCALE      = 500.0   # Gyro: [-500, 500] -> [-1, 1]
 IMU_ACC_SCALE       = 8.0     # Acc:  [-8,  8]   -> [-1, 1]
 
 
-def preprocess_both_feet(p_l, acc_l, gyro_l, mag_l,
-                         p_r, acc_r, gyro_r, mag_r,
+def preprocess_both_feet(p_l, acc_l, gyro_l,
+                         p_r, acc_r, gyro_r,
                          device):
     """
     左足・右足それぞれの圧力・IMUデータを受け取り、
@@ -18,7 +18,7 @@ def preprocess_both_feet(p_l, acc_l, gyro_l, mag_l,
 
     Returns:
         foot_tensor: (1, 1, 70)   — 左足35点 + 右足35点
-        imu_tensor:  (1, 1, 2, 9) — [左センサー, 右センサー] x [mag3, gyro3, acc3]
+        imu_tensor:  (1, 1, 2, 6) — [左センサー, 右センサー] x [gyro3, acc3]
     """
     # --- 足圧 ---
     fl = np.array(p_l, dtype=np.float32) / FOOT_PRESSURE_SCALE
@@ -27,18 +27,16 @@ def preprocess_both_feet(p_l, acc_l, gyro_l, mag_l,
     foot_tensor = torch.tensor(foot, dtype=torch.float32, device=device).unsqueeze(0).unsqueeze(0)
 
     # --- IMU (左足) ---
-    ml = np.array(mag_l,  dtype=np.float32) / IMU_MAG_SCALE
     gl = np.array(gyro_l, dtype=np.float32) / IMU_GYRO_SCALE
     al = np.array(acc_l,  dtype=np.float32) / IMU_ACC_SCALE
-    imu_l = np.concatenate([ml, gl, al])  # (9,)
+    imu_l = np.concatenate([gl, al])  # (6,)
 
     # --- IMU (右足) ---
-    mr = np.array(mag_r,  dtype=np.float32) / IMU_MAG_SCALE
     gr = np.array(gyro_r, dtype=np.float32) / IMU_GYRO_SCALE
     ar = np.array(acc_r,  dtype=np.float32) / IMU_ACC_SCALE
-    imu_r = np.concatenate([mr, gr, ar])  # (9,)
-
-    imu = np.stack([imu_l, imu_r], axis=0)  # (2, 9)
+    imu_r = np.concatenate([gr, ar])  # (6,)
+    
+    imu = np.stack([imu_l, imu_r], axis=0)  # (2, 6)
     imu_tensor = torch.tensor(imu, dtype=torch.float32, device=device).unsqueeze(0).unsqueeze(0)
 
     return foot_tensor, imu_tensor
@@ -55,18 +53,15 @@ def preprocess_foot_pressure(p_list, device):
     return out_tensor
 
 
-def preprocess_imu(acc, gyro, device, mag=None):
+def preprocess_imu(acc, gyro, device):
     """
-    後方互換用: 片足IMU -> (1,1,2,9)。右センサーはゼロパディング。
+    後方互換用: 片足IMU -> (1,1,2,6)。右センサーはゼロパディング。
     ※ 両足データが揃う場合は preprocess_both_feet を使用してください。
     """
-    if mag is None:
-        mag = [0.0, 0.0, 0.0]
-    mag_norm  = np.array(mag,  dtype=np.float32) / IMU_MAG_SCALE
     gyro_norm = np.array(gyro, dtype=np.float32) / IMU_GYRO_SCALE
     acc_norm  = np.array(acc,  dtype=np.float32) / IMU_ACC_SCALE
-    combined_l = np.concatenate([mag_norm, gyro_norm, acc_norm])
-    combined_r = np.zeros(9, dtype=np.float32)
+    combined_l = np.concatenate([gyro_norm, acc_norm])
+    combined_r = np.zeros(6, dtype=np.float32)
     combined = np.stack([combined_l, combined_r], axis=0)
     out_tensor = torch.tensor(combined, dtype=torch.float32, device=device).unsqueeze(0).unsqueeze(0)
     return out_tensor

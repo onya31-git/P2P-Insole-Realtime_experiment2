@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from .encoder import FootPressureEncoder, IMUEncoder, StatefulLSTM
 
 class KinematicFusionModel(nn.Module):
-    def __init__(self, foot_features=70, imu_sensors=2, imu_channels=9,
+    def __init__(self, foot_features=70, imu_sensors=2, imu_channels=6,
                  foot_out=256, imu_out=256, lstm_hidden=512, num_joints=24, lstm_layers=2):
         super().__init__()
         self.foot_encoder = FootPressureEncoder(in_features=foot_features, out_features=foot_out)
@@ -46,7 +46,7 @@ class HierarchicalKinematicFusionModel(nn.Module):
     """
     下半身の関節位置を先に推定し、その特徴を用いて上半身の関節位置を推定する階層型モデル。
     """
-    def __init__(self, foot_features=70, imu_sensors=2, imu_channels=9,
+    def __init__(self, foot_features=70, imu_sensors=2, imu_channels=6,
                  foot_out=256, imu_out=256, lstm_hidden=512, num_joints=24, lstm_layers=2):
         super().__init__()
         self.foot_encoder = FootPressureEncoder(in_features=foot_features, out_features=foot_out)

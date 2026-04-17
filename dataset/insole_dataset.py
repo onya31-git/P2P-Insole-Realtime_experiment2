@@ -54,13 +54,14 @@ class KinematicDataset(Dataset):
             # 2. 足圧とIMUのパース
             foot_l = df_l.iloc[:, 1:36].values.astype(np.float32)
             foot_r = df_r.iloc[:, 1:36].values.astype(np.float32)
-            imu_l = df_l.iloc[:, 36:45].values.astype(np.float32)
-            imu_r = df_r.iloc[:, 36:45].values.astype(np.float32)
+            
+            # Mag (36:39) を除外し、Gyro (39:42) と Acc (42:45) のみを抽出
+            imu_l = df_l.iloc[:, 39:45].values.astype(np.float32)
+            imu_r = df_r.iloc[:, 39:45].values.astype(np.float32)
 
             for data in [imu_l, imu_r]:
-                data[:, 0:3] /= 100.0   # Mag
-                data[:, 3:6] /= 500.0   # Gyro
-                data[:, 6:9] /= 8.0     # Acc
+                data[:, 0:3] /= 500.0   # Gyro
+                data[:, 3:6] /= 8.0     # Acc
 
             foot_l = foot_l / 2000.0
             foot_r = foot_r / 2000.0
